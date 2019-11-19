@@ -122,7 +122,11 @@ def dump(database, output, min_occurences=1, max_occurences=250, returncmd=False
     :param returncmd: If true, will return the command used to call KMC as well as out and err.
     :return: Stdout and stderr from kmc.
     """
-    cmd = 'kmc_tools dump -ci{} -cx{} {} {}'.format(min_occurences, max_occurences, database, output)
+    cmd = 'kmc_tools dump {database} -ci{min} -cx{max} {output}'\
+        .format(database=database,
+                min=min_occurences,
+                max=max_occurences,
+                output=output)
     out, err = accessoryfunctions.run_subprocess(cmd)
     if returncmd:
         return out, err, cmd
