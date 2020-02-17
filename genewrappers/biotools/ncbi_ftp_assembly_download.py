@@ -23,7 +23,7 @@ class AssemblyDownload(object):
 
     def parse_csv(self):
         """
-        
+        Use the csv package to parse the metadata table
         """
         logging.info('Loading metadata table')
         # Load the file into a dictionary using the csv library
