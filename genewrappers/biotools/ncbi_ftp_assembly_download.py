@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-from olctools.accessoryFunctions.accessoryFunctions import SetupLogging
+from olctools.accessoryFunctions.accessoryFunctions import make_path, SetupLogging
 from argparse import ArgumentParser
 from click import progressbar
 from threading import Thread
 from subprocess import call
 from queue import Queue
+from ftplib import FTP
 from time import sleep
 import logging
 import csv
@@ -70,49 +71,60 @@ class AssemblyDownload(object):
         for i in self.assembly_dict:
             for isolate, assembly in self.assembly_dict[i].items():
                 # ftp://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/001/696/305/GCF_001696305.1_UCN72.1/
-                # GCF_001696305.1_UCN72.1_genomic.gbff.gz .
-                self.queue.put((isolate, assembly))
+                # GCF_001696305.1_UCN72.1_genomic.gbff.gz
+                self.queue.put(assembly)
                 # self.queue.put((isolate, assembly))
         self.queue.join()
 
     def threaded_download(self):
         while True:
-            # Extract the isolate and assembly names from the queue
-            isolate, assembly = self.queue.get()
+            # Extract the assembly name from the queue
+            assembly = self.queue.get()
             # Slice the assembly in order to get the pieces necessary to get the FTP URL
             assembly_first_three = assembly[0:3]
             assembly_second_three = assembly[4:7]
             assembly_third_three = assembly[7:10]
             assembly_fourth_three = assembly[10:13]
+            # Set the FTP address
+            ftp_address = 'ftp.ncbi.nlm.nih.gov'
+            # Create an FTP object
+            ftp = FTP(ftp_address)
+            # Log in to the FTP
+            ftp.login()
+            # Set the destination folder based on the NCBI naming scheme
+            ftp_dir = '/genomes/all/{first}/{second}/{third}/{fourth}/' \
+                .format(first=assembly_first_three,
+                        second=assembly_second_three,
+                        third=assembly_third_three,
+                        fourth=assembly_fourth_three,
+                        assembly=assembly)
+            # Navigate to the folder
+            ftp.cwd(ftp_dir)
+            # Retrieve a list of the folders in the directory, and choose the last one from the sorted list
+            file_name = sorted(ftp.nlst())[-1]
             # We are only interested in the assemblies
-            compressed_assembly_remote = '{assembly}_{isolate}_genomic.fna.gz' \
-                .format(assembly=assembly, isolate=isolate)
-            # Set the local names and paths of the assembly as it is downloaded, decompressed, and finally moved to the
-            # desired final naming scheme
-            compressed_assembly = os.path.join(self.path, compressed_assembly_remote)
-            decompressed_assembly = os.path.join(self.path, '{assembly}_{isolate}_genomic.fna'
-                                                 .format(assembly=assembly, isolate=isolate))
-            final_assembly = os.path.join(self.path, '{assembly}_{isolate}.fasta'
-                                          .format(assembly=assembly, isolate=isolate))
-            # Only download the file is none of the potential downstream files exist
-            if not os.path.isfile(compressed_assembly) and not os.path.isfile(
-                    decompressed_assembly) and not os.path.isfile(final_assembly):
-                # Use wget to access the FTP server. Use the strict naming scheme to find the correct URL. -P sets the
-                # output path. Chain the decompressing and renaming steps (with gunzip, and mv, respectively) to the
-                # command
-                wget_cmd = 'wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/{first}/{second}/{third}/' \
-                           '{fourth}/{assembly}_{isolate}/{car} -P {path} && gunzip {ca} && mv {da} {fa}' \
-                    .format(first=assembly_first_three,
-                            second=assembly_second_three,
-                            third=assembly_third_three,
-                            fourth=assembly_fourth_three,
-                            assembly=assembly,
-                            isolate=isolate,
-                            car=compressed_assembly_remote,
-                            path=self.path,
-                            ca=compressed_assembly,
-                            da=decompressed_assembly,
-                            fa=final_assembly)
+            compressed_assembly_remote = '{file_name}_genomic.fna.gz' \
+                .format(file_name=file_name)
+            compressed_assembly = os.path.join(self.outputpath, compressed_assembly_remote)
+            decompressed_assembly = os.path.join(self.outputpath, '{file_name}_genomic.fna'
+                                                 .format(file_name=file_name))
+            final_assembly = os.path.join(self.outputpath, '{assembly}.fasta'
+                                          .format(assembly=assembly))
+            wget_cmd = 'wget ftp://ftp.ncbi.nlm.nih.gov/genomes/all/{first}/{second}/{third}/' \
+                       '{fourth}/{file_name}/{car} -P {path} && gunzip {ca} && mv {da} {fa}' \
+                .format(first=assembly_first_three,
+                        second=assembly_second_three,
+                        third=assembly_third_three,
+                        fourth=assembly_fourth_three,
+                        file_name=file_name,
+                        car=compressed_assembly_remote,
+                        path=self.outputpath,
+                        ca=compressed_assembly,
+                        da=decompressed_assembly,
+                        fa=final_assembly)
+            # Run the wget command if none of the compressed, decompressed, or final assembly files are present
+            if not os.path.isfile(compressed_assembly) and not os.path.isfile(decompressed_assembly) and not os.path.\
+                    isfile(final_assembly):
                 call(wget_cmd, shell=True)
             # Run system calls that attempt to run the second (decompression) and third (renaming) parts of the call
             # in case it was interrupted
@@ -127,18 +139,26 @@ class AssemblyDownload(object):
                 call(mv_cmd, shell=True)
             self.queue.task_done()
 
-    def __init__(self, path, accessiontable, threads, sleep):
+    def __init__(self, path, outputpath, accessiontable, threads, sleeptime):
         if path.startswith('~'):
             self.path = os.path.abspath(os.path.expanduser(os.path.join(path)))
         else:
             self.path = os.path.abspath(os.path.join(path))
+        if outputpath:
+            if outputpath.startswith('~'):
+                self.outputpath = os.path.abspath(os.path.expanduser(os.path.join(outputpath)))
+            else:
+                self.outputpath = os.path.abspath(os.path.join(outputpath))
+        else:
+            self.outputpath = os.path.join(self.path, 'downloads')
+        make_path(self.outputpath)
         self.metadatatable = os.path.join(self.path, accessiontable)
         assert os.path.isfile(self.metadatatable), 'Cannot find supplied pathogen metadata table {at} in ' \
                                                    'supplied path {sp}' \
             .format(at=self.metadatatable,
                     sp=self.path)
         self.threads = threads
-        self.sleeptime = sleep
+        self.sleeptime = sleeptime
         if self.sleeptime:
             assert self.sleeptime > 10, 'Must sleep at least 10 seconds'
             assert self.sleeptime < 86400, 'Cannot sleep for more than 24 hours'
@@ -153,6 +173,8 @@ def cli():
     parser.add_argument('-p', '--path',
                         required=True,
                         help='Path to folder containing necessary tables')
+    parser.add_argument('-o', '--outputpath',
+                        help='Path in which files are to be downloaded. Default is "path/downloads"')
     parser.add_argument('-a', '--accessiontable',
                         default='pathogens.csv',
                         help='Name of metadata table from NCBI (must be in the supplied path). Generate the table '
@@ -173,9 +195,10 @@ def cli():
     arguments = parser.parse_args()
     SetupLogging()
     download = AssemblyDownload(path=arguments.path,
+                                outputpath=arguments.outputpath,
                                 accessiontable=arguments.accessiontable,
                                 threads=arguments.numthreads,
-                                sleep=arguments.sleeptime)
+                                sleeptime=arguments.sleeptime)
     download.main()
     logging.info('NCBI assembly download complete!')
 
