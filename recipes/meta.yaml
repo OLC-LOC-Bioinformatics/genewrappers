@@ -1,0 +1,44 @@
+{% set name = "genewrappers" %}
+{% set version = "{{ version }}" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+build:
+  number: 0
+  noarch: python
+  script: python -m pip install --no-deps --ignore-installed .
+
+source:
+  url: https://github.com/OLC-LOC-Bioinformatics/genewrappers/archive/v{{ version }}.tar.gz
+  fn: {{ name }}-{{ version }}.tar.gz
+
+requirements:
+  host:
+    - python
+    - pip
+    - setuptools
+    - wheel
+  run:
+    - bbmap
+    - illumina-interop
+    - mash
+    - python
+    - olctools=1.3.8=py_0
+    - sra-tools
+
+test:
+  imports:
+    - genewrappers
+    - genewrappers.biotools
+    - tests
+
+about:
+  home: https://github.com/OLC-LOC-Bioinformatics/genewrappers
+  license: MIT
+  license_family: MIT
+  summary: Python wrappers for bioinformatic tools
+
+extra:
+  recipe-maintainers: adamkoziol
